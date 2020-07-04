@@ -1,8 +1,9 @@
-import numpy as np
-
 import torch
 import torch.nn as nn
 
+import numpy as np
+
+__all__ = ['DenseEmbeddingNet', 'ResDenseEmbeddingNet']
 
 class DenseEmbeddingNet(nn.Module):
     # code from fast.ai tabular model
@@ -37,5 +38,52 @@ class DenseEmbeddingNet(nn.Module):
         return output
 
 
+def make_fc_unit(in_sz, out_sz, bn=True, p=0., actn=nn.ReLU()):
+    layers = [nn.Linear(in_sz, out_sz)]
+    if bn: layers.append(nn.BatchNorm1d(out_sz))
+    if actn is not None: layers.append(actn)
+    if p != 0: layers.append(nn.Dropout(p))
+    return layers
+
+
+class BasicBlock(nn.Module):
+    
+    def __init__(self, in_sz, hidden_sz, out_sz, bn=True, p=0., actn=nn.ReLU()):
+        super().__init__()
+        layers = make_fc_unit(in_sz, hidden_sz, bn=True, p=0., actn=nn.ReLU())
+        layers += make_fc_unit(hidden_sz, out_sz, bn=True, p=0., actn=nn.ReLU())
+
+        self.FC = nn.Sequential(*layers)
+        
+        shortcut_layers = make_fc_unit(in_sz, out_sz, bn=True, p=0., actn=nn.ReLU())
+        self.shortcut = nn.Sequential(*shortcut_layers)
+        
+    def forward(self, x):
+        out = self.FC(x) + self.shortcut(x)
+        return out
+
+    
 class ResDenseEmbeddingNet(nn.Module):
-    raise NotImplementedError
+    def __init__(self, in_sz, out_sz, emb_szs, ps, use_bn=True, actn=nn.ReLU()):
+        super().__init__()
+        self.n_embs = len(emb_szs) - 1
+        if ps == 0: ps = np.zeros(self.n_embs)
+        # input FC_unit
+        layers = make_fc_unit(in_sz, emb_szs[0], bn=True, p=0., actn=nn.ReLU())
+        # hidden block
+        for i in range(0, self.n_embs-1, 2):
+            layers.append(BasicBlock(in_sz=emb_szs[i], 
+                                 hidden_sz=emb_szs[i+1], 
+                                 out_sz=emb_szs[i+2],
+                                 bn=True, p=0., actn=nn.ReLU())
+                         )
+        # output layer
+        if self.n_embs % 2 != 0:
+            layers += make_fc_unit(emb_szs[-2], emb_szs[-1], bn=True, p=0., actn=nn.ReLU())
+        layers += make_fc_unit(emb_szs[-1], out_sz, bn=True, p=0., actn=nn.ReLU())
+        self.ResDense = nn.Sequential(*layers)
+        
+    def forward(self, x):
+        out = self.ResDense(x)
+        return out
+    
