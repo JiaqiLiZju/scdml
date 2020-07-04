@@ -188,12 +188,49 @@ loss_histories = hooks.get_loss_history()
 acc_histories = hooks.get_accuracy_history(tester, "val", return_all_metrics=True)
 acc_histories = hooks.get_accuracy_history(tester, "train", return_all_metrics=True)
 
+
+
+####################################################################################
 ## inference
+# extract embeddings
+train_emb, train_lab = tester.get_all_embeddings(train_dataset, model, collate_fn=torch.utils.data._utils.collate.default_collate,)
+val_emb, val_lab = tester.get_all_embeddings(val_dataset, model, collate_fn=torch.utils.data._utils.collate.default_collate,)
+# Visualize embeddings using tSNE 
+# combine validation and holdout embeddings
+comb_emb = np.concatenate((train_emb, val_emb))
+comb_lab = np.concatenate((train_dataset.labels, val_dataset.labels))
+comb_src = np.concatenate((np.repeat("TRAIN", len(train_emb)),
+                           np.repeat("VAL", len(val_emb))))
+
+# get tsne coords
+comb_tsne = TSNE().fit_transform(comb_emb)
+
+sns.scatterplot(x=comb_tsne[:,0], 
+                y=comb_tsne[:,1], 
+                hue=comb_src)
+plt.title('Training & Val Embeddings tSNE')
+plt.show()
+sns.scatterplot(x=comb_tsne[:,0], 
+                y=comb_tsne[:,1], 
+                hue=[label_map[i] for i in comb_lab],
+                style=comb_src,
+                palette='Paired')
+plt.title('Training & Val Embeddings tSNE')
+plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+plt.show()
+
+# set adata
+comb_tsne_df = pd.DataFrame(comb_tsne, index=adata_raw.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+adata_raw.obsm['X_tsne'] = comb_tsne_df.loc[adata_raw.obs.index].values
+
+
+
+####################################################################################
+## importance interpret
+# load model
 model.load_state_dict(torch.load("./example_saved_models/trunk_best25.pth"))
 # model.to(torch.device('cpu'))
 
-
-## importance interpret
 test_input_tensor = torch.from_numpy(X_val).type(torch.FloatTensor).to(torch.device('cpu'))
 
 ig = IntegratedGradients(model)
