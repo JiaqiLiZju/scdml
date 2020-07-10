@@ -2,8 +2,7 @@
 from pytorch_metric_learning import losses, miners, samplers, trainers, testers
 from pytorch_metric_learning.utils import common_functions
 import pytorch_metric_learning.utils.logging_presets as logging_presets
-import numpy as np
-import torchvision
+import torchvision 
 from torchvision import datasets, transforms
 import torch
 import torch.nn as nn
@@ -13,6 +12,7 @@ import record_keeper
 import pytorch_metric_learning
 
 # Data manipulation
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.manifold import TSNE
@@ -77,7 +77,7 @@ class BasicDataset(torch.utils.data.Dataset):
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# get data and format
+# single-cell level preprocess
 adata = sc.read_h5ad("./data/DMCA.h5ad")
 sc.pp.normalize_per_cell(adata, counts_per_cell_after=1e4)
 sc.pp.log1p(adata)
@@ -85,15 +85,11 @@ adata
 
 # create dictionary of label map
 label_map = dict(enumerate(adata.obs['CellType'].cat.categories))
-# extract of some of the most representative clusters for training/testing
-clusters = [0,1,2,3,4,5,6,7,9,10,11,13,14,15,16,17,18,19,21,22,23,24,25,26]
-indices = adata.obs['OldCellType'].cat.codes.isin(clusters)
 
-data, labels = adata.X[indices], adata.obs[indices]['OldCellType'].cat.codes.values
+data, labels = adata.X, adata.obs['OldCellType'].cat.codes.values
 
-# extract holdout clusters for projection
-hld_data, hld_labels = adata.X[~indices], adata.obs[~indices]['OldCellType'].cat.codes.values
-
+# get data and format
+# train_test_split
 X_train_idx, X_val_idx, y_train, y_val = train_test_split(range(len(data)),
                                                   labels,
                                                   stratify=labels,
@@ -105,7 +101,6 @@ X_val= data[X_val_idx]
 # Training, validation, holdout set
 train_dataset = BasicDataset(X_train, y_train)
 val_dataset = BasicDataset(X_val, y_val)
-hld_dataset = BasicDataset(hld_data, hld_labels)
 
 # Set embedder model. This takes in the output of the trunk and outputs 64 dimensional embeddings
 model = EmbeddingNet(in_sz=len(adata.var),
@@ -234,7 +229,16 @@ comb_tsne_df = pd.DataFrame(comb_tsne, index=adata.obs.index[np.concatenate([X_t
 adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
 
 ####################################################################################
-# transfer to held out datasets
+# simply transfer to held out datasets
+# extract of some of the most representative clusters for training/testing
+clusters = [0,1,2,3,4,5,6,7,9,10,11,13,14,15,16,17,18,19,21,22,23,24,25,26]
+indices = adata.obs['OldCellType'].cat.codes.isin(clusters)
+# extract holdout clusters for projection
+hld_data, hld_labels = adata.X[~indices], adata.obs[~indices]['OldCellType'].cat.codes.values
+hld_dataset = BasicDataset(hld_data, hld_labels)
+
+####################################################################################
+# transfer to complex held out datasets
 # set the reference features list
 adata_TM = sc.read_h5ad("./data/TM_Lung.h5ad")
 adata_TM.var['gene_ids'] = adata_TM.var['gene_ids'].astype('category')
@@ -422,19 +426,47 @@ plt.ylabel("Accuracy")
 
 ####################################################################################
 ## importance interpret
-# load model
-model.load_state_dict(torch.load("./example_saved_models/trunk_best25.pth"))
-# model.to(torch.device('cpu'))
+from captum.attr import IntegratedGradients
+from captum.attr import LayerConductance
+from captum.attr import NeuronConductance
+
+# construct model
+class embedder_clf(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embedder = embedder
+        self.clf = classifier
+        
+    def forward(self, x):
+        out = self.embedder(x)
+        out = self.clf(out)
+        return out
+    
+model = embedder_clf()
+model.to(torch.device('cpu'))
+model.eval()
 
 test_input_tensor = torch.from_numpy(X_val).type(torch.FloatTensor).to(torch.device('cpu'))
 
 ig = IntegratedGradients(model)
 
-test_input_tensor.requires_grad_()
-attr, delta = ig.attribute(test_input_tensor, target=1, return_convergence_delta=True)
-attr = attr.detach().numpy()
+attr_l = []
+for i in np.unique(y_val):
+    attr, delta = ig.attribute(test_input_tensor, target=int(i), n_steps=100, internal_batch_size=1024, return_convergence_delta=True)
+    attr = attr.detach().numpy()
+    attr_l.append(attr)
 
-test_input_tensor.requires_grad_()
-attr_0, delta = ig.attribute(test_input_tensor, target=0, return_convergence_delta=True)
-attr_0 = attr_0.detach().numpy()
+attr_mean_l = []
+markers = []
+for attr in attr_l:
+    attr_mean = np.mean(attr, axis=0)
+    attr_mean_l.append(np.sort(attr_mean)[::-1][:200])
+    markers.append(adata_raw.var.index[np.argsort(attr_mean)[::-1][:200]])
 
+pd.DataFrame(markers, index=np.unique(adata_raw.obs['Cluster'])).T.to_csv("markers_metric_learning.csv")
+pd.DataFrame(attr_mean_l, index=np.unique(adata_raw.obs['Cluster'])).T.to_csv("markers_importance_metric_learning.csv")
+
+####################################################################################
+## resume the training checkpoint
+embedder.load_state_dict(torch.load("./test_saved_models/trunk_best9.pth"))
+classifier.load_state_dict(torch.load("./test_saved_models/classifier_best9.pth"))
