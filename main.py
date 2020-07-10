@@ -82,6 +82,7 @@ adata = sc.read_h5ad("./data/DMCA.h5ad")
 sc.pp.normalize_per_cell(adata, counts_per_cell_after=1e4)
 sc.pp.log1p(adata)
 adata
+# adata Matrix M cells * N genes
 
 # create dictionary of label map
 label_map = dict(enumerate(adata.obs['CellType'].cat.categories))
@@ -110,6 +111,8 @@ model = EmbeddingNet(in_sz=len(adata.var),
                      use_bn=False,
                      actn=nn.ReLU())
 model = nn.DataParallel(model).to(device)
+# adata = model(adata)
+# Matrix adata: M cells * out_sz genes // M*25
 
 # Set optimizers
 model_optimizer = torch.optim.Adam(model.parameters(), lr=0.00001, weight_decay=0.0001)
@@ -174,6 +177,7 @@ trainer = trainers.MetricLossOnly(models,
 
 
 trainer.train(num_epochs=100)
+# early stopping
 
 # Get a dictionary mapping from loss names to lists
 loss_histories = hooks.get_loss_history() 
@@ -206,6 +210,7 @@ sns.scatterplot(x=comb_tsne[:,0],
                 hue=comb_src)
 plt.title('Training & Val Embeddings tSNE')
 plt.show()
+
 sns.scatterplot(x=comb_tsne[:,0], 
                 y=comb_tsne[:,1], 
                 hue=[label_map[i] for i in comb_lab],
@@ -216,6 +221,7 @@ plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
 plt.show()
 
 ####################################################################################
+# scanpy api
 # set adata pca
 comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
 adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
@@ -240,6 +246,7 @@ hld_dataset = BasicDataset(hld_data, hld_labels)
 ####################################################################################
 # transfer to complex held out datasets
 # set the reference features list
+# features = ordered genes list
 adata_TM = sc.read_h5ad("./data/TM_Lung.h5ad")
 adata_TM.var['gene_ids'] = adata_TM.var['gene_ids'].astype('category')
 adata_TM.var['gene_ids'].cat.set_categories(adata.var.index.to_list(), inplace=True)
