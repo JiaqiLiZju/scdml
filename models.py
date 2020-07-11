@@ -87,3 +87,14 @@ class ResDenseEmbeddingNet(nn.Module):
         out = self.ResDense(x)
         return out
     
+
+class embedder_clf(nn.Module):
+    def __init__(self, embedder, classifier):
+        super().__init__()
+        self.embedder = embedder
+        self.clf = classifier
+        
+    def forward(self, x):
+        out = self.embedder(x)
+        out = self.clf(out)
+        return out

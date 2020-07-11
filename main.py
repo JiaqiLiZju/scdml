@@ -2,8 +2,8 @@
 from pytorch_metric_learning import losses, miners, samplers, trainers, testers
 from pytorch_metric_learning.utils import common_functions
 import pytorch_metric_learning.utils.logging_presets as logging_presets
-import torchvision 
-from torchvision import datasets, transforms
+# import torchvision 
+# from torchvision import datasets, transforms
 import torch
 import torch.nn as nn
 import logging
