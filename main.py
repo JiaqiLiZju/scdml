@@ -272,22 +272,22 @@ sc.pl.tsne(adata_TM, color='cell_ontology_class', size=50)
 ####################################################################################
 ## learning with classifier
 # adata_raw.write_h5ad("./data/EC_Atlas.h5ad")
-adata_raw = sc.read_h5ad("./data/EC_Atlas.h5ad")
+adata = sc.read_h5ad("./data/EC_Atlas.h5ad")
 # adata
-adata_raw.obs.head()
-np.unique(adata_raw.obs['Cluster'], return_counts=True)
+adata.obs.head()
+np.unique(adata.obs['Cluster'], return_counts=True)
 # create dictionary of label map
-label_map = dict(enumerate(adata_raw.obs['Cluster'].cat.categories))
+label_map = dict(enumerate(adata.obs['Cluster'].cat.categories))
 label_map
 # extract of some of the most representative clusters for training/testing
 clusters = list(range(24))
-# clusters = np.unique(adata_raw.obs['Cluster'].cat.codes)[np.unique(adata_raw.obs['Cluster'].cat.codes, return_counts=True)[-1] > 100]
+# clusters = np.unique(adata.obs['Cluster'].cat.codes)[np.unique(adata.obs['Cluster'].cat.codes, return_counts=True)[-1] > 100]
 # clusters = clusters[clusters!=0]
-indices = adata_raw.obs['Cluster'].cat.codes.isin(clusters)
-data, labels = adata_raw.X[indices], adata_raw.obs[indices]['Cluster'].cat.codes.values
+indices = adata.obs['Cluster'].cat.codes.isin(clusters)
+data, labels = adata.X[indices], adata.obs[indices]['Cluster'].cat.codes.values
 
 # extract holdout clusters for projection
-# hld_data, hld_labels = adata_raw.X[~indices], adata.obs[~indices]['Type'].cat.codes.values
+# hld_data, hld_labels = adata.X[~indices], adata.obs[~indices]['Type'].cat.codes.values
 np.unique(labels, return_counts=True)
 X_train_idx, X_val_idx, y_train, y_val = train_test_split(range(len(data)),
                                                   labels,
@@ -306,14 +306,14 @@ val_dataset = BasicDataset(X_val, y_val)
 # hld_dataset = BasicDataset(hld_data, hld_labels)
 
 # Set embedder model. This takes in the output of the trunk and outputs 64 dimensional embeddings
-embedder = EmbeddingNet(in_sz=len(adata_raw.var),
+embedder = EmbeddingNet(in_sz=len(adata.var),
                      out_sz=64,
                      emb_szs=[2000, 1000, 500, 100],
                      ps=[0.1, 0.1, 0.1, 0.1],
                      use_bn=False,
                      actn=nn.ReLU())
 
-# embedder = ResDenseEmbeddingNet(in_sz=len(adata_raw.var),
+# embedder = ResDenseEmbeddingNet(in_sz=len(adata.var),
 #                          out_sz=64,
 #                          emb_szs=[5000, 1000, 500, 128],
 #                          ps=0,
@@ -387,8 +387,8 @@ tester = testers.GlobalEmbeddingSpaceTester(end_of_testing_hook = hooks.end_of_t
                                             reference_set="compared_to_self", 
                                             normalize_embeddings=True, 
                                             use_trunk_output=True,
-                                            visualizer = umap.UMAP(), 
-                                            visualizer_hook = visualizer_hook,
+                                            # visualizer = umap.UMAP(), 
+                                            # visualizer_hook = visualizer_hook,
                                             dataloader_num_workers = 32)
 
 end_of_epoch_hook = hooks.end_of_epoch_hook(tester, 
@@ -431,6 +431,34 @@ plt.title("Adjusted Mutual Info")
 plt.xlabel("Epoch")
 plt.ylabel("Accuracy")
 
+## inference
+# extract embeddings
+train_emb, train_lab = tester.get_all_embeddings(train_dataset, embedder, collate_fn=torch.utils.data._utils.collate.default_collate,)
+val_emb, val_lab = tester.get_all_embeddings(val_dataset, embedder, collate_fn=torch.utils.data._utils.collate.default_collate,)
+# Visualize embeddings using tSNE 
+# combine validation and holdout embeddings
+comb_emb = np.concatenate((train_emb, val_emb))
+comb_lab = np.concatenate((train_dataset.labels, val_dataset.labels))
+comb_src = np.concatenate((np.repeat("TRAIN", len(train_emb)),
+                        np.repeat("VAL", len(val_emb))))
+
+# scanpy api
+# set adata pca
+comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+# adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
+# config params 
+# adata.uns['pca']['type'] = "scdml"
+# adata.uns['pca']['variance'] = pca_.explained_variance_
+# adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
+
+# get tsne coords
+comb_tsne = TSNE().fit_transform(comb_emb)
+
+# set adata tsne
+comb_tsne_df = pd.DataFrame(comb_tsne, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
+
+
 ####################################################################################
 ## importance interpret
 from captum.attr import IntegratedGradients
@@ -468,10 +496,10 @@ markers = []
 for attr in attr_l:
     attr_mean = np.mean(attr, axis=0)
     attr_mean_l.append(np.sort(attr_mean)[::-1][:200])
-    markers.append(adata_raw.var.index[np.argsort(attr_mean)[::-1][:200]])
+    markers.append(adata.var.index[np.argsort(attr_mean)[::-1][:200]])
 
-pd.DataFrame(markers, index=np.unique(adata_raw.obs['Cluster'])).T.to_csv("markers_metric_learning.csv")
-pd.DataFrame(attr_mean_l, index=np.unique(adata_raw.obs['Cluster'])).T.to_csv("markers_importance_metric_learning.csv")
+pd.DataFrame(markers, index=np.unique(adata.obs['Cluster'])).T.to_csv("markers_metric_learning.csv")
+pd.DataFrame(attr_mean_l, index=np.unique(adata.obs['Cluster'])).T.to_csv("markers_importance_metric_learning.csv")
 
 ####################################################################################
 ## resume the training checkpoint

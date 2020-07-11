@@ -41,15 +41,16 @@ def show_loss(hooks):
     loss_history = hooks.get_loss_history()
     plt.plot(loss_history['metric_loss'], 'r', alpha=0.5, label='metric_loss')
     plt.plot(loss_history['classifier_loss'], 'b', alpha=0.5, label='classifier_loss')
-    # plt.plot(loss_history['total_loss'], 'y', alpha=0.5, label='total_loss')
+    plt.plot(loss_history['total_loss'], 'y', alpha=0.5, label='total_loss')
     plt.legend()
 
+def show_accuracy(hooks, tester):
     plt.figure(facecolor='w')
     for c,ds in zip(['r', 'b'], ['train', 'val']):
         accuracies = hooks.get_accuracy_history(tester, ds, return_all_metrics=True)
         plt.plot(accuracies['epoch'], accuracies['AMI_level0'], '{}x-'.format(c), label=ds)
-    #     plt.plot(accuracies['epoch'], accuracies['r_precision_level0'], '{}o-'.format(c), label=ds)
-        
+        plt.plot(accuracies['epoch'], accuracies['r_precision_level0'], '{}o-'.format(c), label=ds)
+                
     plt.legend()
     plt.title("Adjusted Mutual Info")
     plt.xlabel("Epoch")

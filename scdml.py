@@ -20,7 +20,6 @@ import pytorch_metric_learning.utils.logging_presets as logging_presets
 # Logs
 import logging
 logging.getLogger().setLevel(logging.INFO)
-logging.info("VERSION %s"%pytorch_metric_learning.__version__)
 
 
 from models import DenseEmbeddingNet
@@ -193,7 +192,7 @@ def scdml_clf(adata, obs_label="Celltype"):
     # hld_dataset = BasicDataset(hld_data, hld_labels)
 
     # Set embedder model. This takes in the output of the trunk and outputs 64 dimensional embeddings
-    embedder = EmbeddingNet(in_sz=len(adata_raw.var),
+    embedder = EmbeddingNet(in_sz=len(adata.var),
                         out_sz=64,
                         emb_szs=[2000, 1000, 500, 100],
                         ps=[0.1, 0.1, 0.1, 0.1],
@@ -236,7 +235,7 @@ def scdml_clf(adata, obs_label="Celltype"):
     mining_funcs = {"tuple_miner": miner}
 
     # We can specify loss weights if we want to. This is optional
-    loss_weights = {"metric_loss": 1, "classifier_loss": 1}
+    loss_weights = {"metric_loss": 1, "classifier_loss": 0.5}
 
     record_keeper, _, _ = logging_presets.get_record_keeper("example_logs", "example_tensorboard")
     hooks = logging_presets.get_hook_container(record_keeper)
@@ -244,28 +243,32 @@ def scdml_clf(adata, obs_label="Celltype"):
     model_folder = "example_saved_models"
 
     # Create the tester
-    tester = testers.GlobalEmbeddingSpaceTester(end_of_testing_hook = hooks.end_of_testing_hook,
-                                                dataloader_num_workers = 32,
-                                                use_trunk_output=True)
-
+    tester = testers.GlobalEmbeddingSpaceTester(end_of_testing_hook = hooks.end_of_testing_hook, 
+                                                reference_set="compared_to_self", 
+                                                normalize_embeddings=True, 
+                                                use_trunk_output=True,
+                                                # visualizer = umap.UMAP(), 
+                                                # visualizer_hook = visualizer_hook,
+                                                dataloader_num_workers = 0)
 
     end_of_epoch_hook = hooks.end_of_epoch_hook(tester, 
                                                 dataset_dict, 
                                                 model_folder, 
                                                 test_interval = 1,
                                                 test_collate_fn=torch.utils.data._utils.collate.default_collate,
-                                                patience = 5)
+                                                patience = 1)
 
-
-    trainer = trainers.MetricLossOnly(models,
+    trainer = trainers.TrainWithClassifier(models,
                                     optimizers,
                                     batch_size,
                                     loss_funcs,
                                     mining_funcs,
                                     train_dataset,
+                                        
                                     sampler=sampler,
-                                    dataloader_num_workers = 32,
-                                    collate_fn=torch.utils.data._utils.collate.default_collate,
+                                    dataloader_num_workers = 0,
+                                    loss_weights = loss_weights,
+                                    collate_fn = torch.utils.data._utils.collate.default_collate,
                                     end_of_iteration_hook = hooks.end_of_iteration_hook,
                                     end_of_epoch_hook = end_of_epoch_hook)
 
@@ -283,8 +286,8 @@ def scdml_clf(adata, obs_label="Celltype"):
 
     ## inference
     # extract embeddings
-    train_emb, train_lab = tester.get_all_embeddings(train_dataset, model, collate_fn=torch.utils.data._utils.collate.default_collate,)
-    val_emb, val_lab = tester.get_all_embeddings(val_dataset, model, collate_fn=torch.utils.data._utils.collate.default_collate,)
+    train_emb, train_lab = tester.get_all_embeddings(train_dataset, embedder, collate_fn=torch.utils.data._utils.collate.default_collate,)
+    val_emb, val_lab = tester.get_all_embeddings(val_dataset, embedder, collate_fn=torch.utils.data._utils.collate.default_collate,)
     # Visualize embeddings using tSNE 
     # combine validation and holdout embeddings
     comb_emb = np.concatenate((train_emb, val_emb))
@@ -295,9 +298,9 @@ def scdml_clf(adata, obs_label="Celltype"):
     # scanpy api
     # set adata pca
     comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
+    # adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
     # config params 
-    adata.uns['pca']['type'] = "scdml"
+    # adata.uns['pca']['type'] = "scdml"
     # adata.uns['pca']['variance'] = pca_.explained_variance_
     # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
 
