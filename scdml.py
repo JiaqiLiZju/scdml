@@ -21,12 +21,24 @@ import pytorch_metric_learning.utils.logging_presets as logging_presets
 import logging
 logging.getLogger().setLevel(logging.INFO)
 
-
 from models import DenseEmbeddingNet
 from utils import *
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-def scdml(adata, obs_label="Celltype"):
+def scdml(adata, obs_label="Celltype",
+            test_size=0.1,
+            out_sz=25, emb_szs=[1000, 500, 250, 100], ps=0, use_bn=False, actn=nn.ReLU(),
+            lr=0.00001, weight_decay=0.0001,
+            margin=0.1, distance_norm=2, 
+            batch_size = 64,
+            dataloader_num_workers=0,
+            test_interval = 1, 
+            patience = 5,
+            num_epochs=100,
+
+):
 
     assert obs_label in adata.obs.columns
 
@@ -42,7 +54,7 @@ def scdml(adata, obs_label="Celltype"):
     X_train_idx, X_val_idx, y_train, y_val = train_test_split(range(len(data)),
                                                     labels,
                                                     stratify=labels,
-                                                    test_size=0.1,
+                                                    test_size=test_size,
                                                     random_state=77)
     X_train = data[X_train_idx]
     X_val= data[X_val_idx]
@@ -56,17 +68,18 @@ def scdml(adata, obs_label="Celltype"):
 
     # Set embedder model. This takes in the output of the trunk and outputs 64 dimensional embeddings
     model = EmbeddingNet(in_sz=len(adata.var),
-                        out_sz=25,
-                        emb_szs=[1000, 500, 250, 100],
-                        ps=0,
-                        use_bn=False,
-                        actn=nn.ReLU())
+                        out_sz=out_sz,
+                        emb_szs=emb_szs,
+                        ps=ps,
+                        use_bn=use_bn,
+                        actn=actn)
+
     model = nn.DataParallel(model).to(device)
     # adata = model(adata)
     # Matrix adata: M cells * out_sz genes // M*25
 
     # Set optimizers
-    model_optimizer = torch.optim.Adam(model.parameters(), lr=0.00001, weight_decay=0.0001)
+    model_optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     # Set the loss function
     loss = losses.TripletMarginLoss(margin=0.1,
@@ -83,7 +96,7 @@ def scdml(adata, obs_label="Celltype"):
     # Your Data --> Sampler --> Miner --> Loss --> Reducer --> Final loss value
 
     # Set other training parameters
-    batch_size = 64
+    batch_size = batch_size
 
     # Package the above stuff into dictionaries.
     models = {"trunk": model}
@@ -98,16 +111,16 @@ def scdml(adata, obs_label="Celltype"):
 
     # Create the tester
     tester = testers.GlobalEmbeddingSpaceTester(end_of_testing_hook = hooks.end_of_testing_hook,
-                                                dataloader_num_workers = 32,
+                                                dataloader_num_workers = dataloader_num_workers,
                                                 use_trunk_output=True)
 
 
     end_of_epoch_hook = hooks.end_of_epoch_hook(tester, 
                                                 dataset_dict, 
                                                 model_folder, 
-                                                test_interval = 1,
+                                                test_interval = test_interval,
                                                 test_collate_fn=torch.utils.data._utils.collate.default_collate,
-                                                patience = 5)
+                                                patience = patience)
 
 
     trainer = trainers.MetricLossOnly(models,
@@ -117,23 +130,13 @@ def scdml(adata, obs_label="Celltype"):
                                     mining_funcs,
                                     train_dataset,
                                     sampler=sampler,
-                                    dataloader_num_workers = 32,
+                                    dataloader_num_workers = dataloader_num_workers,
                                     collate_fn=torch.utils.data._utils.collate.default_collate,
                                     end_of_iteration_hook = hooks.end_of_iteration_hook,
                                     end_of_epoch_hook = end_of_epoch_hook)
 
-
-    trainer.train(num_epochs=100)
     # early stopping
-
-    # Get a dictionary mapping from loss names to lists
-    loss_histories = hooks.get_loss_history() 
-
-    # The first argument is the tester object. The second is the split name.
-    # Get a dictionary containing the keys "epoch" and the primary metric
-    # Get all accuracy histories
-    acc_histories = hooks.get_accuracy_history(tester, "val", return_all_metrics=True)
-    acc_histories = hooks.get_accuracy_history(tester, "train", return_all_metrics=True)
+    trainer.train(num_epochs=num_epochs)
 
     ## inference
     # extract embeddings
@@ -149,9 +152,10 @@ def scdml(adata, obs_label="Celltype"):
     # scanpy api
     # set adata pca
     comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    # adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
+    adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
     # config params 
-    # adata.uns['pca']['type'] = "scdml"
+    adata.uns['pca'] = {}
+    adata.uns['pca']['type'] = "scdml"
     # adata.uns['pca']['variance'] = pca_.explained_variance_
     # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
 

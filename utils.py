@@ -72,7 +72,6 @@ def visualize_importances(feature_names, importances, title="Average Feature Imp
 
 
 def find_important_markers(embedder, classifier, adata, X_val, y_val):
-
     # construct model
     model = embedder_clf(embedder, classifier)
     model.to(torch.device('cpu'))
