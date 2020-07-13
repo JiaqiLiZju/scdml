@@ -32,12 +32,13 @@ def scdml(adata, obs_label="Celltype",
             out_sz=25, emb_szs=[1000, 500, 250, 100], ps=0, use_bn=False, actn=nn.ReLU(),
             lr=0.00001, weight_decay=0.0001,
             margin=0.1, distance_norm=2, 
+            miner_m=4,
             batch_size = 64,
             dataloader_num_workers=0,
             test_interval = 1, 
             patience = 5,
             num_epochs=100,
-
+            embedding_on_tsne=True,
 ):
 
     assert obs_label in adata.obs.columns
@@ -82,8 +83,8 @@ def scdml(adata, obs_label="Celltype",
     model_optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     # Set the loss function
-    loss = losses.TripletMarginLoss(margin=0.1,
-                                    distance_norm=2, 
+    loss = losses.TripletMarginLoss(margin=margin,
+                                    distance_norm=distance_norm, 
                                     power=1, 
                                     swap=False, )
 
@@ -91,7 +92,7 @@ def scdml(adata, obs_label="Celltype",
     miner = miners.MultiSimilarityMiner(epsilon=0.1)
 
     # Set the dataloader sampler
-    sampler = samplers.MPerClassSampler(y_train.flatten(), m=4, length_before_new_iter=len(train_dataset))
+    sampler = samplers.MPerClassSampler(y_train.flatten(), m=miner_m, length_before_new_iter=len(train_dataset))
 
     # Your Data --> Sampler --> Miner --> Loss --> Reducer --> Final loss value
 
@@ -159,17 +160,33 @@ def scdml(adata, obs_label="Celltype",
     # adata.uns['pca']['variance'] = pca_.explained_variance_
     # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
 
-    # get tsne coords
-    comb_tsne = TSNE().fit_transform(comb_emb)
+    if embedding_on_tsne:
+        # get tsne coords
+        comb_tsne = TSNE().fit_transform(comb_emb)
 
-    # set adata tsne
-    comb_tsne_df = pd.DataFrame(comb_tsne, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
+        # set adata tsne
+        comb_tsne_df = pd.DataFrame(comb_tsne, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+        adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
 
     return adata
 
 
-def scdml_clf(adata, obs_label="Celltype"):
+def scdml_clf(adata, obs_label="Celltype",
+            test_size=0.1,
+            out_sz=25, emb_szs=[1000, 500, 250, 100], ps=0, use_bn=False, actn=nn.ReLU(),
+            clf_output_size=None,
+            embedder_lr=0.00001, embedder_weight_decay=0.0001,
+            classifier_lr=0.00001, classifier_weight_decay=0.0001,
+            margin=0.1, distance_norm=2, 
+            miner_m=4,
+            batch_size = 64,
+            metric_loss_weight=1, classifier_loss_weight=0.5,
+            dataloader_num_workers=0,
+            test_interval = 1, 
+            patience = 5,
+            num_epochs=100,
+            embedding_on_tsne=True,
+):
 
     assert obs_label in adata.obs.columns
     
@@ -184,11 +201,10 @@ def scdml_clf(adata, obs_label="Celltype"):
     X_train_idx, X_val_idx, y_train, y_val = train_test_split(range(len(data)),
                                                     labels,
                                                     stratify=labels,
-                                                    test_size=0.1,
+                                                    test_size=test_size,
                                                     random_state=77)
     X_train = data[X_train_idx]
     X_val= data[X_val_idx]
-    X_train_idx[:5], X_val_idx[:5], X_train[:5], X_val[:5], y_train[:5], y_val[:5]
 
     # Training, validation, holdout set
     train_dataset = BasicDataset(X_train, y_train)
@@ -197,16 +213,19 @@ def scdml_clf(adata, obs_label="Celltype"):
 
     # Set embedder model. This takes in the output of the trunk and outputs 64 dimensional embeddings
     embedder = EmbeddingNet(in_sz=len(adata.var),
-                        out_sz=64,
-                        emb_szs=[2000, 1000, 500, 100],
-                        ps=[0.1, 0.1, 0.1, 0.1],
-                        use_bn=False,
-                        actn=nn.ReLU())
+                            out_sz=out_sz,
+                            emb_szs=emb_szs,
+                            ps=ps,
+                            use_bn=use_bn,
+                            actn=actn)
 
     # Set the classifier. The classifier will take the embeddings and output a 50 dimensional vector.
     # (Our training set will consist of the first 50 classes of the CIFAR100 dataset.)
     # We'll specify the classification loss further down in the code.
-    classifier = EmbeddingNet(in_sz=64, out_sz=24, emb_szs=[24], ps=0)
+    if clf_output_size is None:
+        clf_output_size = len(np.unique(labels))
+
+    classifier = EmbeddingNet(in_sz=out_sz, out_sz=clf_output_size, emb_szs=[out_sz], ps=0)
 
     # embedder = nn.DataParallel(embedder).to(device)
     # classifier = nn.DataParallel(classifier).to(device)
@@ -214,11 +233,14 @@ def scdml_clf(adata, obs_label="Celltype"):
     classifier = classifier.to(device)
 
     # Set optimizers
-    embedder_optimizer = torch.optim.Adam(embedder.parameters(), lr=0.0001, weight_decay=0.0001)
-    classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=0.0001, weight_decay=0.0001)
+    embedder_optimizer = torch.optim.Adam(embedder.parameters(), lr=embedder_lr, weight_decay=embedder_weight_decay)
+    classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=classifier_lr, weight_decay=classifier_weight_decay)
 
     # Set the loss function
-    loss = losses.TripletMarginLoss(margin=0.1)
+    loss = losses.TripletMarginLoss(margin=margin,
+                                    distance_norm=distance_norm, 
+                                    power=1, 
+                                    swap=False, )
 
     # Set the classification loss:
     classification_loss = torch.nn.CrossEntropyLoss()
@@ -227,10 +249,10 @@ def scdml_clf(adata, obs_label="Celltype"):
     miner = miners.MultiSimilarityMiner(epsilon=0.1)
 
     # Set the dataloader sampler
-    sampler = samplers.MPerClassSampler(y_train.flatten(), m=4, length_before_new_iter=len(train_dataset))
+    sampler = samplers.MPerClassSampler(y_train.flatten(), m=miner_m, length_before_new_iter=len(train_dataset))
 
     # Set other training parameters
-    batch_size = 512
+    batch_size = batch_size
 
     # Package the above stuff into dictionaries.
     models = {"trunk": embedder, "classifier": classifier}
@@ -239,7 +261,7 @@ def scdml_clf(adata, obs_label="Celltype"):
     mining_funcs = {"tuple_miner": miner}
 
     # We can specify loss weights if we want to. This is optional
-    loss_weights = {"metric_loss": 1, "classifier_loss": 0.5}
+    loss_weights = {"metric_loss": metric_loss_weight, "classifier_loss": classifier_loss_weight}
 
     record_keeper, _, _ = logging_presets.get_record_keeper("example_logs", "example_tensorboard")
     hooks = logging_presets.get_hook_container(record_keeper)
@@ -253,14 +275,14 @@ def scdml_clf(adata, obs_label="Celltype"):
                                                 use_trunk_output=True,
                                                 # visualizer = umap.UMAP(), 
                                                 # visualizer_hook = visualizer_hook,
-                                                dataloader_num_workers = 0)
+                                                dataloader_num_workers = dataloader_num_workers)
 
     end_of_epoch_hook = hooks.end_of_epoch_hook(tester, 
                                                 dataset_dict, 
                                                 model_folder, 
-                                                test_interval = 1,
+                                                test_interval = test_interval,
                                                 test_collate_fn=torch.utils.data._utils.collate.default_collate,
-                                                patience = 1)
+                                                patience = patience)
 
     trainer = trainers.TrainWithClassifier(models,
                                     optimizers,
@@ -270,23 +292,14 @@ def scdml_clf(adata, obs_label="Celltype"):
                                     train_dataset,
                                         
                                     sampler=sampler,
-                                    dataloader_num_workers = 0,
+                                    dataloader_num_workers = dataloader_num_workers,
                                     loss_weights = loss_weights,
                                     collate_fn = torch.utils.data._utils.collate.default_collate,
                                     end_of_iteration_hook = hooks.end_of_iteration_hook,
                                     end_of_epoch_hook = end_of_epoch_hook)
 
 
-    trainer.train(num_epochs=100)
-
-    # Get a dictionary mapping from loss names to lists
-    loss_histories = hooks.get_loss_history() 
-
-    # The first argument is the tester object. The second is the split name.
-    # Get a dictionary containing the keys "epoch" and the primary metric
-    # Get all accuracy histories
-    acc_histories = hooks.get_accuracy_history(tester, "val", return_all_metrics=True)
-    acc_histories = hooks.get_accuracy_history(tester, "train", return_all_metrics=True)
+    trainer.train(num_epochs=num_epochs)
 
     ## inference
     # extract embeddings
@@ -302,18 +315,20 @@ def scdml_clf(adata, obs_label="Celltype"):
     # scanpy api
     # set adata pca
     comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    # adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
+    adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
     # config params 
-    # adata.uns['pca']['type'] = "scdml"
+    adata.uns['pca'] = {}
+    adata.uns['pca']['type'] = "scdml"
     # adata.uns['pca']['variance'] = pca_.explained_variance_
     # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
 
-    # get tsne coords
-    comb_tsne = TSNE().fit_transform(comb_emb)
+    if embedding_on_tsne:
+        # get tsne coords
+        comb_tsne = TSNE().fit_transform(comb_emb)
 
-    # set adata tsne
-    comb_tsne_df = pd.DataFrame(comb_tsne, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
+        # set adata tsne
+        comb_tsne_df = pd.DataFrame(comb_tsne, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+        adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
 
     # find_markers
     markers, marker_importance = find_important_markers(embedder, classifier, adata, X_val, y_val)
