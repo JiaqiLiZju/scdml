@@ -336,28 +336,42 @@ def scdml_clf(adata, obs_label="Celltype",
     return adata, markers, marker_importance
 
 
-def inference_pretrained(model, adata):
+def inference_pretrained(model, adata_pretrained, adata_new, batch_size=128, embedding_on_tsne=True):
     # transfer to complex held out datasets
     # set the reference features list
     # features = ordered genes list
-    adata_TM = sc.read_h5ad("./data/TM_Lung.h5ad")
-    adata_TM.var['gene_ids'] = adata_TM.var['gene_ids'].astype('category')
-    adata_TM.var['gene_ids'].cat.set_categories(adata.var.index.to_list(), inplace=True)
-    idx = adata_TM.var.sort_values('gene_ids', ascending=True).index
+    adata_new = sc.read_h5ad("./data/TM_Lung.h5ad")
+    adata_new.var['gene_ids'] = adata_new.var['gene_ids'].astype('category')
+    adata_new.var['gene_ids'].cat.set_categories(adata_pretrained.var.index.to_list(), inplace=True)
+    idx = adata_new.var.sort_values('gene_ids', ascending=True).index
 
-    adata_TM[:, idx]
-    mask_1 = adata.var.index.isin(adata_TM.var.index)
-    mask_2 = adata_TM.var.index.isin(adata.var.index)
-
-    hld_data = np.zeros((1748, 16726))
-    hld_data[:, mask_1] = adata_TM.X.A[:,mask_2]
-    hld_labels = adata_TM.obs['cell_ontology_class'].cat.codes.values
+    adata_new[:, idx]
+    mask_1 = adata_pretrained.var.index.isin(adata_new.var.index)
+    mask_2 = adata_new.var.index.isin(adata_pretrained.var.index)
+    
+    # new_obs * old_vars
+    hld_data = np.zeros((adata_new.obs.shape[0], adata_pretrained.var.shape[0]))
+    hld_data[:, mask_1] = adata_new.X.A[:,mask_2]
+    hld_labels = adata_new.obs['cell_ontology_class'].cat.codes.values
 
     hld_dataset = BasicDataset(hld_data, hld_labels)
+    hld_dataloader = torch.utils.data.DataLoader(hld_dataset, batch_size=batch_size)
 
-    hld_emb, hld_lab = tester.get_all_embeddings(hld_dataset, model, collate_fn=torch.utils.data._utils.collate.default_collate,)
-    comb_tsne = TSNE().fit_transform(hld_emb)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _, hld_emb, _ = _evaluate(hld_dataloader)
 
-    # set adata
-    adata_TM.obsm['X_tsne'] = comb_tsne
-    sc.pl.tsne(adata_TM, color='cell_ontology_class', size=50)
+    # scanpy api
+    # set adata pca
+    adata_new.varm['PCs'] = hld_emb
+    # config params 
+    adata_new.uns['pca'] = {}
+    adata_new.uns['pca']['type'] = "scdml"
+    # adata.uns['pca']['variance'] = pca_.explained_variance_
+    # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
+
+    if embedding_on_tsne:
+        # get tsne coords
+        comb_tsne = TSNE().fit_transform(hld_emb)
+
+        # set adata tsne
+        adata_new.obsm['X_tsne'] = comb_tsne

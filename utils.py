@@ -25,6 +25,25 @@ class BasicDataset(Dataset):
         return len(self.data)
 
 
+def _evaluate(model, data, device):
+    eval_loader = data
+    batch_losses, all_predictions, all_targets = [], [], []
+    model.eval()
+    with torch.no_grad():
+        for inputs, targets in eval_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            output = model(inputs)
+            # test_loss = criterion(output, targets)
+            # batch_losses.append(test_loss.cpu().item())
+            all_predictions.append(output.cpu().data.numpy())
+            all_targets.append(targets.cpu().data.numpy())
+    # average_loss = np.average(batch_losses)
+    # return average_loss, all_predictions, all_targets
+    all_predictions = np.vstack(all_predictions)
+    all_targets = np.vstack(all_targets)
+    return all_predictions, all_targets
+    
+
 def visualizer_hook(umapper, umap_embeddings, labels, split_name, keyname, *args):
     logging.info("UMAP plot for the {} split and label set {}".format(split_name, keyname))
     label_set = np.unique(labels)
