@@ -25,9 +25,10 @@ class BasicDataset(Dataset):
         return len(self.data)
 
 
-def _evaluate(model, data, device):
+def evaluate(model, data, device):
     eval_loader = data
-    batch_losses, all_predictions, all_targets = [], [], []
+    # batch_losses, all_predictions, all_targets = [], [], []
+    all_predictions, all_targets = [], []
     model.eval()
     with torch.no_grad():
         for inputs, targets in eval_loader:

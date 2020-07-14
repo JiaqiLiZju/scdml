@@ -22,7 +22,7 @@ import logging
 logging.getLogger().setLevel(logging.INFO)
 
 from models import DenseEmbeddingNet
-from utils import *
+from .utils import *
 
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -358,7 +358,7 @@ def inference_pretrained(model, adata_pretrained, adata_new, batch_size=128, emb
     hld_dataloader = torch.utils.data.DataLoader(hld_dataset, batch_size=batch_size)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    _, hld_emb, _ = _evaluate(hld_dataloader)
+    _, hld_emb, _ = evaluate(model, hld_dataloader, device)
 
     # scanpy api
     # set adata pca
