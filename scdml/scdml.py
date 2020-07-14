@@ -21,7 +21,7 @@ import pytorch_metric_learning.utils.logging_presets as logging_presets
 import logging
 logging.getLogger().setLevel(logging.INFO)
 
-from models import DenseEmbeddingNet
+from .models import DenseEmbeddingNet
 from .utils import *
 
 import os
@@ -68,7 +68,7 @@ def scdml(adata, obs_label="Celltype",
     val_dataset = BasicDataset(X_val, y_val)
 
     # Set embedder model. This takes in the output of the trunk and outputs 64 dimensional embeddings
-    model = EmbeddingNet(in_sz=len(adata.var),
+    model = DenseEmbeddingNet(in_sz=len(adata.var),
                         out_sz=out_sz,
                         emb_szs=emb_szs,
                         ps=ps,
@@ -212,7 +212,7 @@ def scdml_clf(adata, obs_label="Celltype",
     # hld_dataset = BasicDataset(hld_data, hld_labels)
 
     # Set embedder model. This takes in the output of the trunk and outputs 64 dimensional embeddings
-    embedder = EmbeddingNet(in_sz=len(adata.var),
+    embedder = DenseEmbeddingNet(in_sz=len(adata.var),
                             out_sz=out_sz,
                             emb_szs=emb_szs,
                             ps=ps,
@@ -225,7 +225,7 @@ def scdml_clf(adata, obs_label="Celltype",
     if clf_output_size is None:
         clf_output_size = len(np.unique(labels))
 
-    classifier = EmbeddingNet(in_sz=out_sz, out_sz=clf_output_size, emb_szs=[out_sz], ps=0)
+    classifier = DenseEmbeddingNet(in_sz=out_sz, out_sz=clf_output_size, emb_szs=[out_sz], ps=0)
 
     # embedder = nn.DataParallel(embedder).to(device)
     # classifier = nn.DataParallel(classifier).to(device)

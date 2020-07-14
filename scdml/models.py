@@ -3,7 +3,7 @@ import torch.nn as nn
 
 import numpy as np
 
-__all__ = ['DenseEmbeddingNet', 'ResDenseEmbeddingNet']
+__all__ = ['DenseEmbeddingNet', 'ResDenseEmbeddingNet', 'embedder_clf']
 
 class DenseEmbeddingNet(nn.Module):
     # code from fast.ai tabular model
