@@ -25,12 +25,13 @@ setup(
     python_requires='>=3.6',
     install_requires=[
           'numpy',
-          'scanpy'
+          'scanpy',
           'scikit-learn',
           'tqdm',
           'torch',
           'torchvision',
-          'pytorch_metric_learning'
+          'pytorch_metric_learning',
+          'captum',
     ],
     # extras_require=dict(
     #     louvain=['python-igraph', 'louvain>=0.6'],

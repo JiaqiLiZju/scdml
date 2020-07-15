@@ -28,6 +28,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 def scdml(adata, obs_label="Celltype",
+            device_used="cpu",
             test_size=0.1,
             out_sz=25, emb_szs=[1000, 500, 250, 100], ps=0, use_bn=False, actn=nn.ReLU(),
             lr=0.00001, weight_decay=0.0001,
@@ -43,7 +44,19 @@ def scdml(adata, obs_label="Celltype",
 
     assert obs_label in adata.obs.columns
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # assign device
+    if device_used == "cpu":
+        device = torch.device("cpu")
+        logging.info("using device cpu")
+        if torch.cuda.is_available():
+            logging.warning("using device cpu, cuda is available!")
+    elif device_used == "cuda":
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            logging.info("using device cuda")
+        else:
+            device = torch.device("cpu")
+            logging.warning("using device cpu")
 
     # create dictionary of label map
     label_map = dict(enumerate(adata.obs[obs_label].cat.categories))
@@ -59,9 +72,7 @@ def scdml(adata, obs_label="Celltype",
                                                     random_state=77)
     X_train = data[X_train_idx]
     X_val= data[X_val_idx]
-
-    logging.info(len(X_train_idx))
-    logging.info(len(X_val_idx))
+    logging.info("train data size %d;\t test data size" % (len(X_train_idx, len(X_val_idx))))
 
     # Training, validation, holdout set
     train_dataset = BasicDataset(X_train, y_train)
@@ -75,7 +86,7 @@ def scdml(adata, obs_label="Celltype",
                         use_bn=use_bn,
                         actn=actn)
 
-    model = nn.DataParallel(model).to(device)
+    # model = nn.DataParallel(model).to(device)
     # adata = model(adata)
     # Matrix adata: M cells * out_sz genes // M*25
 
@@ -98,6 +109,7 @@ def scdml(adata, obs_label="Celltype",
 
     # Set other training parameters
     batch_size = batch_size
+    logging.info("setting batch size = %d" % batch_size)
 
     # Package the above stuff into dictionaries.
     models = {"trunk": model}
@@ -340,7 +352,6 @@ def inference_pretrained(model, adata_pretrained, adata_new, batch_size=128, emb
     # transfer to complex held out datasets
     # set the reference features list
     # features = ordered genes list
-    adata_new = sc.read_h5ad("./data/TM_Lung.h5ad")
     adata_new.var['gene_ids'] = adata_new.var['gene_ids'].astype('category')
     adata_new.var['gene_ids'].cat.set_categories(adata_pretrained.var.index.to_list(), inplace=True)
     idx = adata_new.var.sort_values('gene_ids', ascending=True).index

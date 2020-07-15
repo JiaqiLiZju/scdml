@@ -1,7 +1,9 @@
-
+import tqdm
 import numpy as np
 import pandas as pd
+from cycler import cycler
 from matplotlib import pyplot as plt
+from sklearn.preprocessing import normalize
 
 import torch
 from torch.utils.data import Dataset
@@ -11,6 +13,8 @@ from captum.attr import LayerConductance
 from captum.attr import NeuronConductance
 
 from .models import embedder_clf
+
+import logging
 
 # This will be used to create train and val sets
 class BasicDataset(Dataset):
@@ -25,13 +29,13 @@ class BasicDataset(Dataset):
         return len(self.data)
 
 
-def evaluate(model, data, device):
+def evaluate(model, data, device, do_normalize=True):
     eval_loader = data
     # batch_losses, all_predictions, all_targets = [], [], []
     all_predictions, all_targets = [], []
     model.eval()
     with torch.no_grad():
-        for inputs, targets in eval_loader:
+        for _, (inputs, targets) in enumerate(tqdm.tqdm(eval_loader)):
             inputs, targets = inputs.to(device), targets.to(device)
             output = model(inputs)
             # test_loss = criterion(output, targets)
@@ -42,6 +46,9 @@ def evaluate(model, data, device):
     # return average_loss, all_predictions, all_targets
     all_predictions = np.vstack(all_predictions)
     all_targets = np.vstack(all_targets)
+    if do_normalize:
+        logging.info("performing normalization...")
+        all_predictions = normalize(all_predictions)
     return all_predictions, all_targets
     
 
@@ -60,9 +67,11 @@ def visualizer_hook(umapper, umap_embeddings, labels, split_name, keyname, *args
 def show_loss(hooks):
     loss_history = hooks.get_loss_history()
     plt.plot(loss_history['metric_loss'], 'r', alpha=0.5, label='metric_loss')
-    plt.plot(loss_history['classifier_loss'], 'b', alpha=0.5, label='classifier_loss')
+    if 'classifier_loss' in loss_history.keys():
+        plt.plot(loss_history['classifier_loss'], 'b', alpha=0.5, label='classifier_loss')
     plt.plot(loss_history['total_loss'], 'y', alpha=0.5, label='total_loss')
     plt.legend()
+
 
 def show_accuracy(hooks, tester):
     plt.figure(facecolor='w')
@@ -91,32 +100,40 @@ def visualize_importances(feature_names, importances, title="Average Feature Imp
         plt.title(title)
 
 
-def find_important_markers(embedder, classifier, adata, X_val, y_val):
-    # construct model
+def find_important_markers(embedder, classifier, adata, X_val, y_val, reduce_by="mean", internal_batch_size=128):
+    device = torch.device('cpu')
+    logging.info("using device cpu for captum")
+
+    # construct model    
     model = embedder_clf(embedder, classifier)
-    model.to(torch.device('cpu'))
+    model.to(device)
     model.eval()
 
     # generate data
-    test_input_tensor = torch.from_numpy(X_val).type(torch.FloatTensor).to(torch.device('cpu'))
+    test_input_tensor = torch.from_numpy(X_val).type(torch.FloatTensor).to(device)
 
     ig = IntegratedGradients(model)
 
     # process labels
     attr_l = []
     for i in np.unique(y_val):
-        attr, delta = ig.attribute(test_input_tensor, target=int(i), n_steps=100, internal_batch_size=1024, return_convergence_delta=True)
+        attr, delta = ig.attribute(test_input_tensor, target=int(i), n_steps=100, internal_batch_size=internal_batch_size, return_convergence_delta=True)
         attr = attr.detach().numpy()
         attr_l.append(attr)
 
-    attr_mean_l = []
+    attr_reduce_l = []
     markers = []
-    for attr in attr_l:
-        attr_mean = np.mean(attr, axis=0)
-        attr_mean_l.append(np.sort(attr_mean)[::-1][:100])
-        markers.append(adata.var.index[np.argsort(attr_mean)[::-1][:100]])
-
+    if reduce_by == "mean":
+        for attr in attr_l:
+            attr_mean = np.mean(attr, axis=0)
+            attr_reduce_l.append(np.sort(attr_mean)[::-1][:100])
+            markers.append(adata.var.index[np.argsort(attr_mean)[::-1][:100]])
+    elif reduce_by == "median":
+        for attr in attr_l:
+            attr_median = np.median(attr, axis=0)
+            attr_reduce_l.append(np.sort(attr_median)[::-1][:100])
+            markers.append(adata.var.index[np.argsort(attr_median)[::-1][:100]])
     markers = pd.DataFrame(markers, index=np.unique(adata.obs['Cluster'])).T
-    marker_importance = pd.DataFrame(attr_mean_l, index=np.unique(adata.obs['Cluster'])).T
+    marker_importance = pd.DataFrame(attr_reduce_l, index=np.unique(adata.obs['Cluster'])).T
 
     return markers, marker_importance
