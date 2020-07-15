@@ -1,4 +1,6 @@
 import tqdm
+import logging
+
 import numpy as np
 import pandas as pd
 from cycler import cycler
@@ -14,7 +16,18 @@ from captum.attr import NeuronConductance
 
 from .models import embedder_clf
 
-import logging
+# hook
+class ActivateFeaturesHook():
+    def __init__(self, module):
+        self.features = []
+        self.hook = module.register_forward_hook(self.hook_fn)
+    def hook_fn(self, module, input, output):
+        self.features.append(output.cpu().data.numpy())
+    def get_total_features(self):
+        return np.vstack(self.features)
+    def close(self):
+        self.hook.remove()
+
 
 # This will be used to create train and val sets
 class BasicDataset(Dataset):

@@ -348,19 +348,23 @@ def scdml_clf(adata, obs_label="Celltype",
     return adata, markers, marker_importance
 
 
-def inference_pretrained(model, adata_pretrained, adata_new, batch_size=128, embedding_on_tsne=True):
+def inference_pretrained(model, pretrained_features, label_map, adata_new, batch_size=128, embedding_on_tsne=True):
+    assert isinstance(model, embedder_clf)
+    
     # transfer to complex held out datasets
     # set the reference features list
     # features = ordered genes list
+    pretrained_features = pd.Index(pretrained_features)
+
     adata_new.var['gene_ids'] = adata_new.var.index.astype('category')
-    adata_new.var['gene_ids'].cat.set_categories(adata_pretrained.var.index.to_list(), inplace=True)
+    adata_new.var['gene_ids'].cat.set_categories(pretrained_features.to_list(), inplace=True)
     idx = adata_new.var.sort_values('gene_ids', ascending=True).index
 
-    mask_1 = adata_pretrained.var.index.isin(adata_new.var.index)
-    mask_2 = adata_new.var.index.isin(adata_pretrained.var.index)
+    mask_1 = pretrained_features.isin(adata_new.var.index)
+    mask_2 = adata_new.var.index.isin(pretrained_features)
     
     # new_obs * old_vars
-    hld_data = np.zeros((adata_new.obs.shape[0], adata_pretrained.var.shape[0]))
+    hld_data = np.zeros((adata_new.obs.shape[0], len(pretrained_features)))
     hld_data[:, mask_1] = adata_new.X[:,mask_2]
     # hld_data[:, mask_1] = adata_new.X.A[:,mask_2]
     # hld_labels = adata_new.obs['cell_ontology_class'].cat.codes.values
@@ -371,7 +375,17 @@ def inference_pretrained(model, adata_pretrained, adata_new, batch_size=128, emb
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-    hld_emb, _ = evaluate(model, hld_dataloader, device)
+
+    # register embedding hook 
+    activations = ActivateFeaturesHook(model.embedder)
+    probs, _ = evaluate(model, hld_dataloader, device)
+    hld_emb = activations.get_total_features()
+    activations.close()
+
+    label = np.argmax(probs, axis=-1)
+    label = [label_map[x] for x in label]
+
+    adata_new.obs["scdml_annotation"] = label
 
     # scanpy api
     # set adata pca
@@ -385,7 +399,6 @@ def inference_pretrained(model, adata_pretrained, adata_new, batch_size=128, emb
     if embedding_on_tsne:
         # get tsne coords
         comb_tsne = TSNE().fit_transform(hld_emb)
-
         # set adata tsne
         adata_new.obsm['X_tsne'] = comb_tsne
 
