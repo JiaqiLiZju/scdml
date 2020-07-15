@@ -150,7 +150,7 @@ def scdml(adata, obs_label="Celltype",
 
     # early stopping
     trainer.train(num_epochs=num_epochs)
-
+    
     ## inference
     # extract embeddings
     train_emb, train_lab = tester.get_all_embeddings(train_dataset, model, collate_fn=torch.utils.data._utils.collate.default_collate,)

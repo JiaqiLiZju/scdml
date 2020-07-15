@@ -1,3 +1,4 @@
+import os
 import tqdm
 import logging
 
@@ -15,6 +16,28 @@ from captum.attr import LayerConductance
 from captum.attr import NeuronConductance
 
 from .models import embedder_clf
+
+
+def save_checkpoint(model, features_name, label_map, model_path):
+    model.to(torch.device("cpu"))
+    checkpoint = {
+        'model': model,
+        'features_name': features_name,
+        'label_map': label_map
+    }
+
+    torch.save(checkpoint, model_path)
+    logging.info("model saved")
+
+
+def load_checkpoint(model_path):
+    assert os.path.isfile(model_path)
+    checkpoint = torch.load(model_path)
+    model = checkpoint['model']
+    features_name = checkpoint['features_name']
+    label_map = checkpoint['label_map']
+    return model, features_name, label_map
+    
 
 # hook
 class ActivateFeaturesHook():
