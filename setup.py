@@ -4,18 +4,17 @@ if sys.version_info < (3,):
 from pathlib import Path
 
 from setuptools import setup, find_packages
-import versioneer
 
 
 try:
-    from scdml import __author__, __email__
+    from scdml import __author__, __email__, __version__
 except ImportError:  # Deps not yet installed
     __author__ = __email__ = 'Jiaqili@zju.edu.cn'
 
 setup(
     name='scdml',
-    version=versioneer.get_version(),
-    cmdclass=versioneer.get_cmdclass(),
+    # version=__version__,
+    # cmdclass=versioneer.get_cmdclass(),
     description='Single-Cell Analysis in Python.',
     long_description=Path('README.rst').read_text('utf-8'),
     url='https://github.com/JiaqiLiZju/sc_metric_learning',

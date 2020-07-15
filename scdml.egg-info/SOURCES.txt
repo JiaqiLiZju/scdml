@@ -1,0 +1,13 @@
+README.rst
+setup.py
+scdml/__init__.py
+scdml/models.py
+scdml/scdml.py
+scdml/utils.py
+scdml.egg-info/PKG-INFO
+scdml.egg-info/SOURCES.txt
+scdml.egg-info/dependency_links.txt
+scdml.egg-info/entry_points.txt
+scdml.egg-info/not-zip-safe
+scdml.egg-info/requires.txt
+scdml.egg-info/top_level.txt
