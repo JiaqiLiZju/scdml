@@ -352,31 +352,33 @@ def inference_pretrained(model, adata_pretrained, adata_new, batch_size=128, emb
     # transfer to complex held out datasets
     # set the reference features list
     # features = ordered genes list
-    adata_new.var['gene_ids'] = adata_new.var['gene_ids'].astype('category')
+    adata_new.var['gene_ids'] = adata_new.var.index.astype('category')
     adata_new.var['gene_ids'].cat.set_categories(adata_pretrained.var.index.to_list(), inplace=True)
     idx = adata_new.var.sort_values('gene_ids', ascending=True).index
 
-    adata_new[:, idx]
     mask_1 = adata_pretrained.var.index.isin(adata_new.var.index)
     mask_2 = adata_new.var.index.isin(adata_pretrained.var.index)
     
     # new_obs * old_vars
     hld_data = np.zeros((adata_new.obs.shape[0], adata_pretrained.var.shape[0]))
-    hld_data[:, mask_1] = adata_new.X.A[:,mask_2]
-    hld_labels = adata_new.obs['cell_ontology_class'].cat.codes.values
+    hld_data[:, mask_1] = adata_new.X[:,mask_2]
+    # hld_data[:, mask_1] = adata_new.X.A[:,mask_2]
+    # hld_labels = adata_new.obs['cell_ontology_class'].cat.codes.values
+    hld_labels = np.zeros((adata_new.obs.shape[0], 1))
 
     hld_dataset = BasicDataset(hld_data, hld_labels)
     hld_dataloader = torch.utils.data.DataLoader(hld_dataset, batch_size=batch_size)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    _, hld_emb, _ = evaluate(model, hld_dataloader, device)
+    model.to(device)
+    hld_emb, _ = evaluate(model, hld_dataloader, device)
 
     # scanpy api
     # set adata pca
-    adata_new.varm['PCs'] = hld_emb
+    adata_new.obsm['scdml'] = hld_emb
     # config params 
-    adata_new.uns['pca'] = {}
-    adata_new.uns['pca']['type'] = "scdml"
+    adata_new.uns['scdml'] = {}
+    adata_new.uns['scdml']['type'] = "scdml"
     # adata.uns['pca']['variance'] = pca_.explained_variance_
     # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
 
@@ -386,3 +388,5 @@ def inference_pretrained(model, adata_pretrained, adata_new, batch_size=128, emb
 
         # set adata tsne
         adata_new.obsm['X_tsne'] = comb_tsne
+
+    return adata_new
