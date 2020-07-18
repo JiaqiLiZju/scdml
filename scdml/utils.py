@@ -138,7 +138,7 @@ def visualize_importances(feature_names, importances, title="Average Feature Imp
 
 def find_important_markers(embedder, classifier, adata, X_val, y_val, reduce_by="mean", internal_batch_size=128):
     device = torch.device('cpu')
-    logging.info("using device cpu for captum")
+    logging.info("using device cpu in find_important_markers")
 
     # construct model    
     model = embedder_clf(embedder, classifier)

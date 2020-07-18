@@ -40,6 +40,7 @@ def scdml(adata, obs_label="Celltype",
             patience = 5,
             num_epochs=100,
             embedding_on_tsne=True,
+            model_path="./model_saved.pth"
 ):
 
     assert obs_label in adata.obs.columns
@@ -57,9 +58,6 @@ def scdml(adata, obs_label="Celltype",
         else:
             device = torch.device("cpu")
             logging.warning("using device cpu")
-
-    # create dictionary of label map
-    label_map = dict(enumerate(adata.obs[obs_label].cat.categories))
 
     # get data and format
     data, labels = adata.X, adata.obs[obs_label].cat.codes.values
@@ -150,7 +148,14 @@ def scdml(adata, obs_label="Celltype",
 
     # early stopping
     trainer.train(num_epochs=num_epochs)
-    
+
+    # create dictionary of label map
+    label_map = dict(enumerate(adata.obs[obs_label].cat.categories))
+    features_name = adata.var.index.to_list()
+    # save models
+    save_checkpoint(model, features_name, label_map, model_path)
+    logging.info("saving models...")
+
     ## inference
     # extract embeddings
     train_emb, train_lab = tester.get_all_embeddings(train_dataset, model, collate_fn=torch.utils.data._utils.collate.default_collate,)
@@ -163,9 +168,13 @@ def scdml(adata, obs_label="Celltype",
                             np.repeat("VAL", len(val_emb))))
 
     # scanpy api
-    # set adata pca
+    # sort the index after train_test_split and shffule
+    # set adata.obs.labels
     comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
+    adata.obs['scdml_src'] = comb_src_df.loc[adata.obs.index].values
+    # set adata pca
+    comb_emb_df = pd.DataFrame(comb_emb, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+    adata.varm['PCs'] = comb_emb_df.loc[adata.obs.index].values
     # config params 
     adata.uns['pca'] = {}
     adata.uns['pca']['type'] = "scdml"
@@ -179,7 +188,7 @@ def scdml(adata, obs_label="Celltype",
         # set adata tsne
         comb_tsne_df = pd.DataFrame(comb_tsne, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
         adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
-
+    
     return adata
 
 
@@ -198,14 +207,26 @@ def scdml_clf(adata, obs_label="Celltype",
             patience = 5,
             num_epochs=100,
             embedding_on_tsne=True,
+            model_path="./model_saved.pth"
 ):
 
     assert obs_label in adata.obs.columns
+
+    # assign device
+    if device_used == "cpu":
+        device = torch.device("cpu")
+        logging.info("using device cpu")
+        if torch.cuda.is_available():
+            logging.warning("using device cpu, cuda is available!")
+    elif device_used == "cuda":
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            logging.info("using device cuda")
+        else:
+            device = torch.device("cpu")
+            logging.warning("using device cpu")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # create dictionary of label map
-    label_map = dict(enumerate(adata.obs[obs_label].cat.categories))
 
     # get data and format
     data, labels = adata.X, adata.obs[obs_label].cat.codes.values
@@ -313,6 +334,13 @@ def scdml_clf(adata, obs_label="Celltype",
 
     trainer.train(num_epochs=num_epochs)
 
+    # create dictionary of label map
+    label_map = dict(enumerate(adata.obs[obs_label].cat.categories))
+    features_name = adata.var.index.to_list()
+    # save models
+    save_checkpoint(model, features_name, label_map, model_path)
+    logging.info("saving models...")
+
     ## inference
     # extract embeddings
     train_emb, train_lab = tester.get_all_embeddings(train_dataset, embedder, collate_fn=torch.utils.data._utils.collate.default_collate,)
@@ -325,9 +353,13 @@ def scdml_clf(adata, obs_label="Celltype",
                             np.repeat("VAL", len(val_emb))))
 
     # scanpy api
-    # set adata pca
+    # sort the index after train_test_split and shffule
+    # set adata.obs.labels
     comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
+    adata.obs['scdml_src'] = comb_src_df.loc[adata.obs.index].values
+    # set adata pca
+    comb_emb_df = pd.DataFrame(comb_emb, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+    adata.varm['PCs'] = comb_emb_df.loc[adata.obs.index].values
     # config params 
     adata.uns['pca'] = {}
     adata.uns['pca']['type'] = "scdml"
@@ -343,18 +375,24 @@ def scdml_clf(adata, obs_label="Celltype",
         adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
 
     # find_markers
+    logging.info("find_important_markers may takes time...")
     markers, marker_importance = find_important_markers(embedder, classifier, adata, X_val, y_val)
 
     return adata, markers, marker_importance
 
 
-def inference_pretrained(model, pretrained_features, label_map, adata_new, batch_size=128, embedding_on_tsne=True):
-    assert isinstance(model, embedder_clf)
+def inference_pretrained(model_path, adata_new, batch_size=128, embedding_on_tsne=True):
+    try:
+        model, features_name, label_map = load_checkpoint(model_path)
+    except:
+        logging.info("cannot load model")
+
+    assert isinstance(model, embedder_clf), "model shoul be embedder_classifier"
     
     # transfer to complex held out datasets
     # set the reference features list
     # features = ordered genes list
-    pretrained_features = pd.Index(pretrained_features)
+    pretrained_features = pd.Index(features_name)
 
     adata_new.var['gene_ids'] = adata_new.var.index.astype('category')
     adata_new.var['gene_ids'].cat.set_categories(pretrained_features.to_list(), inplace=True)
@@ -388,18 +426,23 @@ def inference_pretrained(model, pretrained_features, label_map, adata_new, batch
     adata_new.obs["scdml_annotation"] = label
 
     # scanpy api
+    # sort the index after train_test_split and shffule
+    # set adata.obs.labels
+    comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+    adata.obs['scdml_src'] = comb_src_df.loc[adata.obs.index].values
     # set adata pca
-    adata_new.obsm['scdml'] = hld_emb
+    comb_emb_df = pd.DataFrame(comb_emb, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+    adata.varm['PCs'] = comb_emb_df.loc[adata.obs.index].values
     # config params 
-    adata_new.uns['scdml'] = {}
-    adata_new.uns['scdml']['type'] = "scdml"
-    # adata.uns['pca']['variance'] = pca_.explained_variance_
-    # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
+    adata.uns['pca'] = {}
+    adata.uns['pca']['type'] = "scdml"
 
     if embedding_on_tsne:
         # get tsne coords
-        comb_tsne = TSNE().fit_transform(hld_emb)
+        comb_tsne = TSNE().fit_transform(comb_emb)
+
         # set adata tsne
-        adata_new.obsm['X_tsne'] = comb_tsne
+        comb_tsne_df = pd.DataFrame(comb_tsne, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+        adata.obsm['X_tsne'] = comb_tsne_df.loc[adata.obs.index].values
 
     return adata_new
