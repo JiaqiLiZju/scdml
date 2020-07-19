@@ -1,8 +1,0 @@
-numpy
-scanpy
-scikit-learn
-tqdm
-torch
-torchvision
-pytorch_metric_learning
-captum
