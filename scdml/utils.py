@@ -18,6 +18,11 @@ from captum.attr import NeuronConductance
 from .models import embedder_clf
 
 
+def onehot_encode(label):
+    from sklearn.preprocessing import label_binarize
+    return label_binarize(label, classes=range(np.max(label)+1))
+
+
 def save_checkpoint(model, features_name, label_map, model_path):
     model.to(torch.device("cpu"))
     checkpoint = {
