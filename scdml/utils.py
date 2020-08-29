@@ -18,6 +18,7 @@ from captum.attr import NeuronConductance
 from .models import embedder_clf
 
 
+<<<<<<< HEAD
 def assign_device(device_used):
     # assign device
     if device_used == "cpu":
@@ -34,6 +35,11 @@ def assign_device(device_used):
             logging.warning("using device cpu")
     return device
 
+=======
+def onehot_encode(label):
+    from sklearn.preprocessing import label_binarize
+    return label_binarize(label, classes=range(np.max(label)+1))
+>>>>>>> bc9729e6c55528ded2595347cf9ff8b1abca014e
 
 
 def save_checkpoint(model, features_name, label_map, model_path):
@@ -154,12 +160,12 @@ def visualize_importances(feature_names, importances, title="Average Feature Imp
         plt.title(title)
 
 
-def find_important_markers(embedder, classifier, adata, X_val, y_val, reduce_by="mean", internal_batch_size=128):
+def find_important_markers(model, adata, X_val, y_val, reduce_by="mean", internal_batch_size=128):
     device = torch.device('cpu')
-    logging.info("using device cpu for captum")
+    logging.info("using device cpu in find_important_markers")
 
     # construct model    
-    model = embedder_clf(embedder, classifier)
+    assert isinstance(model, embedder_clf)
     model.to(device)
     model.eval()
 

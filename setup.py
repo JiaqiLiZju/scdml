@@ -43,7 +43,7 @@ setup(
     # `package_data` does NOT work for source distributions!!!
     # you also need MANIFTEST.in
     # https://stackoverflow.com/questions/7522250/how-to-include-package-data-with-setuptools-distribute
-    package_data={'': '*.txt'},
+    # package_data={'': '*.txt'},
     include_package_data=True,
     entry_points=dict(
         console_scripts=['scanpy=scanpy.cli:console_main'],
