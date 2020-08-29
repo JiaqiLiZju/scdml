@@ -18,6 +18,24 @@ from captum.attr import NeuronConductance
 from .models import embedder_clf
 
 
+def assign_device(device_used):
+    # assign device
+    if device_used == "cpu":
+        device = torch.device("cpu")
+        logging.info("using device cpu")
+        if torch.cuda.is_available():
+            logging.warning("using device cpu, cuda is available!")
+    elif device_used == "cuda":
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            logging.info("using device cuda")
+        else:
+            device = torch.device("cpu")
+            logging.warning("using device cpu")
+    return device
+
+
+
 def save_checkpoint(model, features_name, label_map, model_path):
     model.to(torch.device("cpu"))
     checkpoint = {

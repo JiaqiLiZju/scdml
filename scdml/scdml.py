@@ -2,6 +2,8 @@
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from anndata import AnnData
+from scipy.sparse import issparse
 
 # ML
 from sklearn.model_selection import train_test_split
@@ -24,8 +26,8 @@ logging.getLogger().setLevel(logging.INFO)
 from .models import DenseEmbeddingNet
 from .utils import *
 
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 def scdml(adata, obs_label="Celltype",
             device_used="cpu",
@@ -41,28 +43,18 @@ def scdml(adata, obs_label="Celltype",
             num_epochs=100,
             embedding_on_tsne=True,
 ):
+    # arg parser
+    assert isinstance(adata, AnnData), "adata should be AnnData object"
+    assert obs_label in adata.obs.columns, "obs_label should be in adata.obs.columns"
 
-    assert obs_label in adata.obs.columns
-
-    # assign device
-    if device_used == "cpu":
-        device = torch.device("cpu")
-        logging.info("using device cpu")
-        if torch.cuda.is_available():
-            logging.warning("using device cpu, cuda is available!")
-    elif device_used == "cuda":
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-            logging.info("using device cuda")
-        else:
-            device = torch.device("cpu")
-            logging.warning("using device cpu")
+    device = assign_device(device_used)
 
     # create dictionary of label map
     label_map = dict(enumerate(adata.obs[obs_label].cat.categories))
 
     # get data and format
     data, labels = adata.X, adata.obs[obs_label].cat.codes.values
+    if issparse(data): data = data.to_array()
 
     # train_test_split
     X_train_idx, X_val_idx, y_train, y_val = train_test_split(range(len(data)),
@@ -70,8 +62,7 @@ def scdml(adata, obs_label="Celltype",
                                                     stratify=labels,
                                                     test_size=test_size,
                                                     random_state=77)
-    X_train = data[X_train_idx]
-    X_val= data[X_val_idx]
+    X_train, X_val = data[X_train_idx], data[X_val_idx]
     logging.info("train data size %d;\t test data size" % (len(X_train_idx, len(X_val_idx))))
 
     # Training, validation, holdout set
@@ -164,8 +155,8 @@ def scdml(adata, obs_label="Celltype",
 
     # scanpy api
     # set adata pca
-    comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    adata.varm['PCs'] = comb_src_df.loc[adata.obs.index].values
+    comb_emb_df = pd.DataFrame(comb_emb, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
+    adata.varm['PCs'] = comb_emb_df.loc[adata.obs.index].values
     # config params 
     adata.uns['pca'] = {}
     adata.uns['pca']['type'] = "scdml"
@@ -384,6 +375,69 @@ def inference_pretrained(model, pretrained_features, label_map, adata_new, batch
 
     label = np.argmax(probs, axis=-1)
     label = [label_map[x] for x in label]
+
+    adata_new.obs["scdml_annotation"] = label
+
+    # scanpy api
+    # set adata pca
+    adata_new.obsm['scdml'] = hld_emb
+    # config params 
+    adata_new.uns['scdml'] = {}
+    adata_new.uns['scdml']['type'] = "scdml"
+    # adata.uns['pca']['variance'] = pca_.explained_variance_
+    # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
+
+    if embedding_on_tsne:
+        # get tsne coords
+        comb_tsne = TSNE().fit_transform(hld_emb)
+        # set adata tsne
+        adata_new.obsm['X_tsne'] = comb_tsne
+
+    return adata_new
+
+
+def inference_pretrained_model(model_path, adata_new, Threshold=0.7, batch_size=128, embedding_on_tsne=True):
+    # load model
+    model, features_name, label_map = load_checkpoint(model_path)
+    logging.info("pretrained model loaded")
+    
+    assert isinstance(model, embedder_clf)
+    
+    # transfer to complex held out datasets
+    # set the reference features list
+    # features = ordered genes list
+    pretrained_features = pd.Index(features_name)
+
+    adata_new.var['gene_ids'] = adata_new.var.index.astype('category')
+    adata_new.var['gene_ids'].cat.set_categories(pretrained_features.to_list(), inplace=True)
+    idx = adata_new.var.sort_values('gene_ids', ascending=True).index
+
+    mask_1 = pretrained_features.isin(adata_new.var.index)
+    mask_2 = adata_new.var.index.isin(pretrained_features)
+    
+    # new_obs * old_vars
+    hld_data = np.zeros((adata_new.obs.shape[0], len(pretrained_features)))
+    hld_data[:, mask_1] = adata_new.X[:,mask_2]
+    # hld_data[:, mask_1] = adata_new.X.A[:,mask_2]
+    # hld_labels = adata_new.obs['cell_ontology_class'].cat.codes.values
+    hld_labels = np.zeros((adata_new.obs.shape[0], 1))
+
+    hld_dataset = BasicDataset(hld_data, hld_labels)
+    hld_dataloader = torch.utils.data.DataLoader(hld_dataset, batch_size=batch_size)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # register embedding hook 
+    activations = ActivateFeaturesHook(model.embedder)
+    probs, _ = evaluate(model, hld_dataloader, device)
+    hld_emb = activations.get_total_features()
+    activations.close()
+
+    label = np.argmax(probs, axis=-1)
+    label = [label_map[x] for x in label]
+    unlabeled_idx = np.where(probs < Threshold)
+    label[unlabeled_idx] = "Unknown (rejected by scdml)"
 
     adata_new.obs["scdml_annotation"] = label
 
