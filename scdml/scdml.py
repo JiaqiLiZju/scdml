@@ -60,14 +60,8 @@ def scdml(adata, obs_label="Celltype",
                                                     stratify=labels,
                                                     test_size=test_size,
                                                     random_state=77)
-<<<<<<< HEAD
     X_train, X_val = data[X_train_idx], data[X_val_idx]
     logging.info("train data size %d;\t test data size" % (len(X_train_idx, len(X_val_idx))))
-=======
-    X_train = data[X_train_idx]
-    X_val= data[X_val_idx]
-    logging.info("train data size %d;\t test data size %d" % (len(X_train_idx), len(X_val_idx)))
->>>>>>> bc9729e6c55528ded2595347cf9ff8b1abca014e
 
     # Training, validation, holdout set
     train_dataset = BasicDataset(X_train, y_train)
@@ -166,19 +160,9 @@ def scdml(adata, obs_label="Celltype",
     save_checkpoint(model, features_name, label_map, model_path)
     
     # scanpy api
-<<<<<<< HEAD
     # set adata pca
     comb_emb_df = pd.DataFrame(comb_emb, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
     adata.varm['PCs'] = comb_emb_df.loc[adata.obs.index].values
-=======
-    # sort the index after train_test_split and shffule
-    # set adata.obs.labels
-    comb_src_df = pd.DataFrame(comb_src, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    adata.obs['scdml_src'] = comb_src_df.loc[adata.obs.index].values
-    # set adata pca
-    comb_emb_df = pd.DataFrame(comb_emb, index=adata.obs.index[np.concatenate([X_train_idx, X_val_idx])])
-    adata.obsm['X_pca'] = comb_emb_df.loc[adata.obs.index].values
->>>>>>> bc9729e6c55528ded2595347cf9ff8b1abca014e
     # config params 
     adata.uns['pca'] = {}
     adata.uns['pca']['type'] = "scdml"
@@ -389,7 +373,7 @@ def scdml_clf(adata, obs_label="Celltype",
     return adata, markers, marker_importance
 
 
-def inference_pretrained(model_path, adata_new, batch_size=128, embedding_on_tsne=True):
+def inference_pretrained(model_path, adata_new, batch_size=128, Threshold=0.7, embedding_on_tsne=True):
     try:
         model, features_name, label_map = load_checkpoint(model_path)
     except:
@@ -430,6 +414,8 @@ def inference_pretrained(model_path, adata_new, batch_size=128, embedding_on_tsn
 
     label = np.argmax(probs, axis=-1)
     label = [label_map[x] for x in label]
+    unlabeled = np.where(prob < Threshold)
+    label[unlabeled] = 'Unknown (rejected by scdml)'
 
     adata_new.obs["scdml_annotation"] = label
 
@@ -450,59 +436,6 @@ def inference_pretrained(model_path, adata_new, batch_size=128, embedding_on_tsn
     return adata_new
 
 
-<<<<<<< HEAD
-def inference_pretrained_model(model_path, adata_new, Threshold=0.7, batch_size=128, embedding_on_tsne=True):
-    # load model
-    model, features_name, label_map = load_checkpoint(model_path)
-    logging.info("pretrained model loaded")
-    
-    assert isinstance(model, embedder_clf)
-    
-    # transfer to complex held out datasets
-    # set the reference features list
-    # features = ordered genes list
-    pretrained_features = pd.Index(features_name)
-
-    adata_new.var['gene_ids'] = adata_new.var.index.astype('category')
-    adata_new.var['gene_ids'].cat.set_categories(pretrained_features.to_list(), inplace=True)
-    idx = adata_new.var.sort_values('gene_ids', ascending=True).index
-
-    mask_1 = pretrained_features.isin(adata_new.var.index)
-    mask_2 = adata_new.var.index.isin(pretrained_features)
-    
-    # new_obs * old_vars
-    hld_data = np.zeros((adata_new.obs.shape[0], len(pretrained_features)))
-    hld_data[:, mask_1] = adata_new.X[:,mask_2]
-    # hld_data[:, mask_1] = adata_new.X.A[:,mask_2]
-    # hld_labels = adata_new.obs['cell_ontology_class'].cat.codes.values
-    hld_labels = np.zeros((adata_new.obs.shape[0], 1))
-
-    hld_dataset = BasicDataset(hld_data, hld_labels)
-    hld_dataloader = torch.utils.data.DataLoader(hld_dataset, batch_size=batch_size)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-
-    # register embedding hook 
-    activations = ActivateFeaturesHook(model.embedder)
-    probs, _ = evaluate(model, hld_dataloader, device)
-    hld_emb = activations.get_total_features()
-    activations.close()
-
-    label = np.argmax(probs, axis=-1)
-    label = [label_map[x] for x in label]
-    unlabeled_idx = np.where(probs < Threshold)
-    label[unlabeled_idx] = "Unknown (rejected by scdml)"
-
-    adata_new.obs["scdml_annotation"] = label
-
-    # scanpy api
-    # set adata pca
-    adata_new.obsm['scdml'] = hld_emb
-    # config params 
-    adata_new.uns['scdml'] = {}
-    adata_new.uns['scdml']['type'] = "scdml"
-=======
 def scdml_BCE_clf(adata, obs_label="Celltype",
             test_size=0.1,
             device_used="cuda",
@@ -678,19 +611,10 @@ def scdml_BCE_clf(adata, obs_label="Celltype",
     # config params 
     adata.uns['pca'] = {}
     adata.uns['pca']['type'] = "scdml"
->>>>>>> bc9729e6c55528ded2595347cf9ff8b1abca014e
     # adata.uns['pca']['variance'] = pca_.explained_variance_
     # adata.uns['pca']['variance_ratio'] = pca_.explained_variance_ratio_
 
     if embedding_on_tsne:
-<<<<<<< HEAD
-        # get tsne coords
-        comb_tsne = TSNE().fit_transform(hld_emb)
-        # set adata tsne
-        adata_new.obsm['X_tsne'] = comb_tsne
-
-    return adata_new
-=======
         logging.info("calculating tSNE...")
         # get tsne coords
         comb_tsne = TSNE().fit_transform(comb_emb)
@@ -704,4 +628,3 @@ def scdml_BCE_clf(adata, obs_label="Celltype",
     markers, marker_importance = find_important_markers(model, adata, X_val, y_val)
 
     return adata, markers, marker_importance
->>>>>>> bc9729e6c55528ded2595347cf9ff8b1abca014e
