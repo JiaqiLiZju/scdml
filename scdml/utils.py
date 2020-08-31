@@ -17,8 +17,6 @@ from captum.attr import NeuronConductance
 
 from .models import embedder_clf
 
-
-<<<<<<< HEAD
 def assign_device(device_used):
     # assign device
     if device_used == "cpu":
@@ -34,12 +32,6 @@ def assign_device(device_used):
             device = torch.device("cpu")
             logging.warning("using device cpu")
     return device
-
-=======
-def onehot_encode(label):
-    from sklearn.preprocessing import label_binarize
-    return label_binarize(label, classes=range(np.max(label)+1))
->>>>>>> bc9729e6c55528ded2595347cf9ff8b1abca014e
 
 
 def save_checkpoint(model, features_name, label_map, model_path):

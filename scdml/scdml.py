@@ -13,7 +13,6 @@ from sklearn.metrics import pairwise_distances
 # torch
 import torch
 import torch.nn as nn
-
 # pytorch_metric_learning
 from pytorch_metric_learning import losses, miners, samplers, trainers, testers
 from pytorch_metric_learning.utils import common_functions

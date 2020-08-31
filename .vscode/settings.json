@@ -1,3 +1,3 @@
 {
-    "python.pythonPath": "/home/ggj/anaconda3/envs/pytorch-cuda/bin/python"
+    "python.pythonPath": "/usr/local/anaconda3/bin/python"
 }
